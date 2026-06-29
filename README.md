@@ -20,6 +20,8 @@ import { after } from "next/server";
 const streamContext = createResumableStreamContext({
   waitUntil: after,
   // Optionally pass in your own Redis publisher and subscriber
+  // Optional: increase this if listener acknowledgements can exceed 1s in your environment.
+  ackTimeoutMs: 2_500,
 });
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ streamId: string }> }) {
@@ -52,6 +54,7 @@ import { after } from "next/server";
 const streamContext = createResumableStreamContext({
   waitUntil: after,
   // Optionally pass in your own Redis publisher and subscriber
+  ackTimeoutMs: 2_500,
 });
 
 export async function POST(
@@ -97,6 +100,7 @@ import { createResumableStreamContext } from "resumable-stream/ioredis";
 const streamContext = createResumableStreamContext({
   waitUntil: after,
   // Optionally pass in your own Redis publisher and subscriber
+  ackTimeoutMs: 2_500,
 });
 ```
 
@@ -110,27 +114,46 @@ import type { Publisher, Subscriber } from "resumable-stream/generic";
 
 // Example: Create adapters for your Redis client
 const publisher: Publisher = {
-  connect: async () => { /* ... */ },
-  publish: async (channel, message) => { /* ... */ },
-  set: async (key, value, options) => { /* ... */ },
-  get: async (key) => { /* ... */ },
-  incr: async (key) => { /* ... */ },
+  connect: async () => {
+    /* ... */
+  },
+  publish: async (channel, message) => {
+    /* ... */
+  },
+  set: async (key, value, options) => {
+    /* ... */
+  },
+  get: async (key) => {
+    /* ... */
+  },
+  incr: async (key) => {
+    /* ... */
+  },
 };
 
 const subscriber: Subscriber = {
-  connect: async () => { /* ... */ },
-  subscribe: async (channel, callback) => { /* ... */ },
-  unsubscribe: async (channel) => { /* ... */ },
+  connect: async () => {
+    /* ... */
+  },
+  subscribe: async (channel, callback) => {
+    /* ... */
+  },
+  unsubscribe: async (channel) => {
+    /* ... */
+  },
 };
 
 const streamContext = createResumableStreamContext({
   waitUntil: after,
   publisher,
   subscriber,
+  ackTimeoutMs: 2_500,
 });
 ```
 
 **Note:** When using the generic interface, both `publisher` and `subscriber` are **required**. The library will throw an error if they are not provided.
+
+`ackTimeoutMs` controls how long a resumed listener waits for the producer to acknowledge it before failing. It defaults to `1_000`, which preserves the previous behavior.
 
 ## Type Docs
 

@@ -2,11 +2,17 @@ import type { Publisher, Subscriber } from "../src";
 
 type PubSub = Publisher & Subscriber;
 
+interface CreateInMemoryPubSubForTestingOptions {
+  deliveryDelayMs?: (channel: string, message: string) => number;
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function createInMemoryPubSubForTesting(): {
+export function createInMemoryPubSubForTesting(
+  options: CreateInMemoryPubSubForTestingOptions = {}
+): {
   subscriber: PubSub;
   publisher: PubSub;
 } {
@@ -21,6 +27,17 @@ export function createInMemoryPubSubForTesting(): {
       await sleep(1);
       for (const callback of callbacks) {
         console.log("invoking callback", channel);
+        const deliveryDelayMs = options.deliveryDelayMs?.(channel, message) || 0;
+        if (deliveryDelayMs > 0) {
+          setTimeout(() => {
+            try {
+              callback(message);
+            } catch (e) {
+              console.error("error invoking callback", e);
+            }
+          }, deliveryDelayMs);
+          continue;
+        }
         try {
           callback(message);
         } catch (e) {

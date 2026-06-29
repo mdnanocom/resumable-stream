@@ -6,18 +6,23 @@ import { createPublisherAdapter, createSubscriberAdapter } from "./ioredis-adapt
 
 interface CreateResumableStreamContext {
   keyPrefix: string;
+  ackTimeoutMs: number;
   waitUntil: (promise: Promise<unknown>) => void;
   subscriber: Subscriber;
   publisher: Publisher;
 }
 
+const DEFAULT_ACK_TIMEOUT_MS = 1_000;
+
 export function createResumableStreamContextFactory(defaults: _Private.RedisDefaults) {
   return function createResumableStreamContext(
     options: CreateResumableStreamContextOptions
   ): ResumableStreamContext {
+    const ackTimeoutMs = getAckTimeoutMs(options.ackTimeoutMs);
     const waitUntil = options.waitUntil || (async (p) => await p);
     const ctx = {
       keyPrefix: `${options.keyPrefix || "resumable-stream"}:rs`,
+      ackTimeoutMs,
       waitUntil,
       subscriber: options.subscriber,
       publisher: options.publisher,
@@ -267,12 +272,13 @@ export async function resumeStream(
             const val = await ctx.publisher.get(`${ctx.keyPrefix}:sentinel:${streamId}`);
             if (val === DONE_VALUE) {
               resolve(null);
+              return;
             }
-            if (Date.now() - start > 1000) {
+            if (Date.now() - start > ctx.ackTimeoutMs) {
               controller.error(new Error("Timeout waiting for ack"));
               reject(new Error("Timeout waiting for ack"));
             }
-          }, 1000);
+          }, ctx.ackTimeoutMs);
           await ctx.subscriber.subscribe(
             `${ctx.keyPrefix}:chunk:${listenerId}`,
             async (message: string) => {
@@ -320,6 +326,14 @@ export async function resumeStream(
       },
     });
   });
+}
+
+function getAckTimeoutMs(ackTimeoutMs: number | undefined): number {
+  const value = ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS;
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error("ackTimeoutMs must be a positive finite number");
+  }
+  return value;
 }
 
 function incrOrDone(publisher: Publisher, key: string): Promise<typeof DONE_VALUE | number> {

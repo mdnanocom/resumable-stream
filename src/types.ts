@@ -6,6 +6,11 @@ export interface CreateResumableStreamContextOptions {
    */
   keyPrefix?: string;
   /**
+   * How long to wait for the producer to acknowledge a resumed listener before failing.
+   * Defaults to `1_000`.
+   */
+  ackTimeoutMs?: number;
+  /**
    * A function that takes a promise and ensures that the current program stays alive
    * until the promise is resolved.
    *

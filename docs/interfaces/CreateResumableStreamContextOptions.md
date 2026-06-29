@@ -8,6 +8,15 @@
 
 ## Properties
 
+### ackTimeoutMs?
+
+> `optional` **ackTimeoutMs**: `number`
+
+How long to wait for the producer to acknowledge a resumed listener before failing.
+Defaults to `1_000`.
+
+***
+
 ### keyPrefix?
 
 > `optional` **keyPrefix**: `string`

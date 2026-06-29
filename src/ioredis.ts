@@ -13,6 +13,7 @@ export { resumeStream } from "./runtime";
  *
  * @param options - The context options.
  * @param options.keyPrefix - The prefix for the keys used by the resumable streams. Defaults to `resumable-stream`.
+ * @param options.ackTimeoutMs - How long to wait for a resumed listener acknowledgement before failing. Defaults to `1_000`.
  * @param options.waitUntil - A function that takes a promise and ensures that the current program stays alive until the promise is resolved.
  * @param options.subscriber - A pubsub subscriber. Designed to be compatible with clients from the `redis` package. If not provided, a new client will be created based on REDIS_URL or KV_URL environment variables.
  * @param options.publisher - A pubsub publisher. Designed to be compatible with clients from the `redis` package. If not provided, a new client will be created based on REDIS_URL or KV_URL environment variables.

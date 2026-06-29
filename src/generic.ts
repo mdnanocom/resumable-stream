@@ -6,12 +6,13 @@ export { resumeStream } from "./runtime";
 
 /**
  * Creates a global context for resumable streams from which you can create resumable streams.
- * 
+ *
  * This generic version requires you to provide your own Publisher and Subscriber implementations,
  * making it compatible with any Redis-like client (Upstash Redis, Valkey, etc.).
  *
  * @param options - The context options.
  * @param options.keyPrefix - The prefix for the keys used by the resumable streams. Defaults to `resumable-stream`.
+ * @param options.ackTimeoutMs - How long to wait for a resumed listener acknowledgement before failing. Defaults to `1_000`.
  * @param options.waitUntil - A function that takes a promise and ensures that the current program stays alive until the promise is resolved.
  * @param options.subscriber - A pubsub subscriber implementing the Subscriber interface. **Required**.
  * @param options.publisher - A pubsub publisher implementing the Publisher interface. **Required**.
@@ -29,4 +30,3 @@ export const createResumableStreamContext = createResumableStreamContextFactory(
     );
   },
 });
-
