@@ -9,6 +9,7 @@ interface CreateResumableStreamContext {
   waitUntil: (promise: Promise<unknown>) => void;
   subscriber: Subscriber;
   publisher: Publisher;
+  doneWatchdogIntervalMs?: number;
 }
 
 export function createResumableStreamContextFactory(defaults: _Private.RedisDefaults) {
@@ -21,6 +22,7 @@ export function createResumableStreamContextFactory(defaults: _Private.RedisDefa
       waitUntil,
       subscriber: options.subscriber,
       publisher: options.publisher,
+      doneWatchdogIntervalMs: options.doneWatchdogIntervalMs,
     } as CreateResumableStreamContext;
     let initPromises: Promise<unknown>[] = [];
 
@@ -106,6 +108,8 @@ interface ResumeStreamMessage {
 const DONE_MESSAGE = "\n\n\nDONE_SENTINEL_hasdfasudfyge374%$%^$EDSATRTYFtydryrte\n";
 
 const DONE_VALUE = "DONE";
+
+const DEFAULT_DONE_WATCHDOG_INTERVAL_MS = 10_000;
 
 async function resumeExistingStream(
   initPromise: Promise<unknown>,
@@ -259,8 +263,49 @@ export async function resumeStream(
         try {
           debugLog("STARTING STREAM", streamId, listenerId);
           const cleanup = async () => {
+            clearInterval(doneWatchdog);
             await ctx.subscriber.unsubscribe(`${ctx.keyPrefix}:chunk:${listenerId}`);
           };
+          // The DONE control message travels over pub/sub, which is fire-and-forget: if that one
+          // message is lost (e.g. the subscriber connection dropped and reconnected at the wrong
+          // moment, or the producer died between writing the DONE sentinel and publishing), this
+          // stream would stay open forever even though the durable sentinel already says DONE.
+          // Re-check the sentinel periodically and close once the producer is finished or the
+          // sentinel expired. Closing requires two consecutive DONE observations so in-flight
+          // messages get a full interval to drain before we give up on them.
+          let doneObservations = 0;
+          const doneWatchdog = setInterval(async () => {
+            try {
+              const val = await ctx.publisher.get(`${ctx.keyPrefix}:sentinel:${streamId}`);
+              if (val !== DONE_VALUE && val !== null) {
+                doneObservations = 0;
+                return;
+              }
+              doneObservations += 1;
+              if (doneObservations < 2) {
+                return;
+              }
+              debugLog(
+                "done watchdog: sentinel is done but no DONE message arrived; closing",
+                streamId,
+                listenerId
+              );
+              try {
+                controller.close();
+              } catch (e) {
+                // The stream may already be closed because the client disconnected.
+                if (isDebug()) {
+                  console.error(e);
+                }
+              }
+              await cleanup();
+            } catch (e) {
+              // A failed sentinel read (e.g. Redis briefly unavailable) must not kill the stream; retry next tick.
+              if (isDebug()) {
+                console.error(e);
+              }
+            }
+          }, ctx.doneWatchdogIntervalMs ?? DEFAULT_DONE_WATCHDOG_INTERVAL_MS);
           const start = Date.now();
           const timeout = setTimeout(async () => {
             await cleanup();

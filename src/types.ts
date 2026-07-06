@@ -21,6 +21,12 @@ export interface CreateResumableStreamContextOptions {
    * A pubsub publisher. Designed to be compatible with clients from the `redis` package.
    */
   publisher?: Publisher | Redis;
+  /**
+   * How often resumed streams re-check the durable DONE sentinel as a fallback for a lost DONE
+   * pub/sub message. A resumed stream closes after two consecutive checks observe a finished
+   * (or expired) sentinel. Defaults to 10000.
+   */
+  doneWatchdogIntervalMs?: number;
 }
 
 export interface ResumableStreamContext {
