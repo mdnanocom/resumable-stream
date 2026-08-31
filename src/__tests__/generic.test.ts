@@ -1,9 +1,54 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { createResumableStreamContext } from "../generic";
+import { resumeStream } from "../runtime";
+import type { Publisher, Subscriber } from "../types";
 import { createInMemoryPubSubForTesting } from "../../testing-utils/in-memory-pubsub";
 import { streamToBuffer, createTestingStream } from "../../testing-utils/testing-stream";
 
+function createResumeStreamTestContext(
+  get: Publisher["get"] = async () => "1",
+  autoAcknowledge = true
+) {
+  let onMessage: ((message: string) => void) | undefined;
+  const unsubscribe = vi.fn(async () => {});
+  const subscriber: Subscriber = {
+    connect: async () => {},
+    subscribe: async (_channel, callback) => {
+      onMessage = callback;
+    },
+    unsubscribe,
+  };
+  const publisher: Publisher = {
+    connect: async () => {},
+    publish: async () => {
+      if (autoAcknowledge) {
+        onMessage?.("");
+      }
+      return 1;
+    },
+    set: async () => "OK",
+    get,
+    incr: async () => 1,
+  };
+
+  return {
+    ctx: {
+      keyPrefix: "test-resume",
+      waitUntil: () => {},
+      subscriber,
+      publisher,
+      doneWatchdogIntervalMs: 10,
+    } satisfies Parameters<typeof resumeStream>[0],
+    unsubscribe,
+    acknowledge: () => onMessage?.(""),
+  };
+}
+
 describe("generic interface", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("should work with custom publisher/subscriber implementations", async () => {
     const { publisher, subscriber } = createInMemoryPubSubForTesting();
 
@@ -125,6 +170,70 @@ describe("generic interface", () => {
       expect(await streamToBuffer(resumedStream!)).toBe("Hello World!");
     }
   );
+
+  it("cleans up the done watchdog when subscription setup fails", async () => {
+    vi.useFakeTimers();
+    const get = vi.fn(async () => "1");
+    const { ctx, unsubscribe } = createResumeStreamTestContext(get);
+    ctx.subscriber.subscribe = async () => {
+      throw new Error("subscribe failed");
+    };
+
+    await expect(resumeStream(ctx, "failed-subscription")).rejects.toThrow("subscribe failed");
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(get).not.toHaveBeenCalled();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it("cleans up the done watchdog when the resumed stream is cancelled", async () => {
+    vi.useFakeTimers();
+    const get = vi.fn(async () => "1");
+    const { ctx, unsubscribe } = createResumeStreamTestContext(get);
+    const stream = await resumeStream(ctx, "cancelled-stream");
+
+    await stream!.cancel();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(get).not.toHaveBeenCalled();
+    expect(unsubscribe).toHaveBeenCalledOnce();
+  });
+
+  it("does not start the done watchdog before the initial ack", async () => {
+    vi.useFakeTimers();
+    const get = vi.fn(async () => "1");
+    const { ctx, acknowledge } = createResumeStreamTestContext(get, false);
+    const streamPromise = resumeStream(ctx, "delayed-ack");
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(get).not.toHaveBeenCalled();
+
+    acknowledge();
+    const stream = await streamPromise;
+    await stream!.cancel();
+  });
+
+  it("does not overlap done watchdog checks when Redis is slow", async () => {
+    vi.useFakeTimers();
+    let resolveGet: (value: string) => void;
+    const get = vi.fn(() => {
+      return new Promise<string>((resolve) => {
+        resolveGet = resolve;
+      });
+    });
+    const { ctx } = createResumeStreamTestContext(get);
+    const stream = await resumeStream(ctx, "slow-redis");
+
+    vi.advanceTimersByTime(10);
+    expect(get).toHaveBeenCalledOnce();
+
+    vi.advanceTimersByTime(35);
+    expect(get).toHaveBeenCalledOnce();
+
+    resolveGet("1");
+    await Promise.resolve();
+    await stream!.cancel();
+  });
 
   it("should throw error if publisher is not provided", () => {
     expect(() => {
